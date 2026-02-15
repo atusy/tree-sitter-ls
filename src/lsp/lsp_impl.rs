@@ -760,50 +760,26 @@ impl Kakehashi {
             .collect()
     }
 
-    /// Forward didChange and process injected languages using pre-resolved injection data.
+    /// Process injected languages: resolve injection data, optionally forward didChange,
+    /// auto-install missing parsers, and eagerly open virtual documents.
     ///
     /// This resolves injection data **once** and uses it for:
-    /// 1. Forwarding didChange to already-opened virtual documents in bridges
+    /// 1. Forwarding didChange to already-opened virtual documents (when `forward_did_change` is true)
     /// 2. Auto-install check for missing parsers
     /// 3. Eager server spawn + didOpen for virtual documents
     ///
     /// Must be called AFTER parse_document so we have access to the AST.
-    async fn forward_and_process_injections(&self, uri: &Url) {
+    async fn process_injections(&self, uri: &Url, forward_did_change: bool) {
         let injections = self.resolve_injection_data(uri);
         if injections.is_empty() {
             return;
         }
 
-        // Forward didChange to opened virtual documents
-        self.bridge
-            .forward_didchange_to_opened_docs(uri, &injections)
-            .await;
-
-        // Derive unique language set for auto-install
-        let languages: HashSet<String> =
-            injections.iter().map(|(lang, _, _)| lang.clone()).collect();
-
-        // Check for missing parsers and trigger auto-install
-        self.check_injected_languages_auto_install(uri, &languages)
-            .await;
-
-        // Eagerly spawn bridge servers and open virtual documents
-        self.eager_spawn_bridge_servers(uri, injections);
-    }
-
-    /// Process injected languages: auto-install missing parsers and eagerly open virtual documents.
-    ///
-    /// This resolves injection data once and uses it for both:
-    /// 1. Auto-install check for missing parsers
-    /// 2. Eager server spawn + didOpen for virtual documents
-    ///
-    /// This must be called AFTER parse_document so we have access to the AST.
-    async fn process_injected_languages(&self, uri: &Url) {
-        // Resolve all injection regions (computed once)
-        let injections = self.resolve_injection_data(uri);
-
-        if injections.is_empty() {
-            return;
+        if forward_did_change {
+            // Forward didChange to opened virtual documents
+            self.bridge
+                .forward_didchange_to_opened_docs(uri, &injections)
+                .await;
         }
 
         // Derive unique language set for auto-install
@@ -1268,7 +1244,7 @@ impl LanguageServer for Kakehashi {
 
         // Process injected languages: auto-install missing parsers and spawn bridge servers.
         // This must be called AFTER parse_document so we have access to the AST.
-        self.process_injected_languages(&uri).await;
+        self.process_injections(&uri, false).await;
 
         // ADR-0020 Phase 2: Trigger synthetic diagnostic push on didOpen
         // This provides proactive diagnostics for clients that don't support pull diagnostics.
@@ -1396,7 +1372,7 @@ impl LanguageServer for Kakehashi {
         // 2. Auto-install missing parsers
         // 3. Eager server spawn + didOpen for virtual documents
         // Must be called AFTER parse_document so we have access to the updated AST.
-        self.forward_and_process_injections(&uri).await;
+        self.process_injections(&uri, true).await;
 
         // ADR-0020 Phase 3: Schedule debounced diagnostic push on didChange.
         // After 500ms of no changes, diagnostics will be collected and published.
