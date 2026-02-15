@@ -30,7 +30,7 @@ mod message_sender;
 mod shutdown;
 mod shutdown_timeout;
 #[cfg(test)]
-pub(super) mod test_helpers;
+pub(in crate::lsp::bridge) mod test_helpers;
 
 pub(crate) use connection_action::BridgeError;
 use connection_action::{ConnectionAction, decide_connection_action};
@@ -331,6 +331,20 @@ impl LanguageServerPool {
         &self,
     ) -> tokio::sync::MutexGuard<'_, HashMap<String, Arc<ConnectionHandle>>> {
         self.connections.lock().await
+    }
+
+    /// Insert a pre-created connection handle for testing.
+    ///
+    /// This allows tests to set up a pool with a known connection state
+    /// without going through the full server spawn + handshake flow.
+    #[cfg(test)]
+    pub(in crate::lsp::bridge) async fn insert_connection(
+        &self,
+        server_name: &str,
+        handle: Arc<ConnectionHandle>,
+    ) {
+        let mut connections = self.connections.lock().await;
+        connections.insert(server_name.to_string(), handle);
     }
 
     // ========================================
